@@ -1,8 +1,12 @@
 """Tests for llm-citation-extract-py."""
-import pytest
+
 from llm_citation_extract import (
-    extract_citations, extract_urls, extract_numbered_refs,
-    strip_citations, Citation, CitationResult,
+    extract_citations,
+    extract_urls,
+    extract_numbered_refs,
+    strip_citations,
+    Citation,
+    CitationResult,
 )
 
 
@@ -135,3 +139,30 @@ def test_citation_dataclass():
 def test_citation_result_has_references_false():
     result = extract_citations("just text")
     assert result.has_references is False
+
+
+def test_strip_citations_removes_numbered_markers():
+    text = "This is supported [1] and also [2]."
+    cleaned = strip_citations(text)
+    assert "[1]" not in cleaned
+    assert "[2]" not in cleaned
+    assert "supported" in cleaned
+    assert "also" in cleaned
+
+
+def test_strip_citations_no_double_spaces():
+    cleaned = strip_citations("a [1] b [2] c")
+    assert "  " not in cleaned
+    assert cleaned == "a b c"
+
+
+def test_strip_citations_removes_grouped_markers():
+    cleaned = strip_citations("See refs [1,2] and [3-4] here.")
+    assert "[" not in cleaned
+    assert "refs" in cleaned and "here" in cleaned
+
+
+def test_cleaned_text_keeps_markdown_label():
+    result = extract_citations("Check [OpenAI](https://openai.com) for info.")
+    assert "OpenAI" in result.cleaned_text
+    assert "https://openai.com" not in result.cleaned_text
