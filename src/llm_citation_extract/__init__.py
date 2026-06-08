@@ -5,6 +5,30 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+__version__ = "0.1.0"
+
+# Punctuation that commonly trails a URL when it ends a sentence or clause in
+# prose, e.g. "see https://example.com." — these are not part of the URL.
+_TRAILING_PUNCT = ".,;:!?"
+
+
+def _trim_url(url: str) -> str:
+    """Strip sentence-trailing punctuation from a bare URL.
+
+    LLM output frequently ends a sentence with a URL ("see https://x.com."),
+    leaving a stray ``.``/``!``/``?``/``,``/``;``/``:`` glued to the link. A
+    single unbalanced closing parenthesis (from "(see https://x.com)") is also
+    removed. URLs captured from markdown links are already delimited and are
+    not passed through this helper.
+    """
+    while url and url[-1] in _TRAILING_PUNCT:
+        url = url[:-1]
+    # Drop a trailing ")" only when it has no matching "(" inside the URL,
+    # i.e. it belongs to the surrounding prose rather than the URL itself.
+    if url.endswith(")") and url.count(")") > url.count("("):
+        url = url[:-1]
+    return url
+
 
 @dataclass
 class Citation:
@@ -72,13 +96,16 @@ def extract_citations(text: str) -> CitationResult:
     # 2. Bare URLs
     url_pattern = re.compile(r'(?<!\()(https?://[^\s\)\]\>,"\']+)', re.IGNORECASE)
     for m in url_pattern.finditer(cleaned):
+        url = _trim_url(m.group(1))
+        if not url:
+            continue
         # Skip if already captured as part of a markdown link
-        if not any(c.url == m.group(1) for c in citations):
+        if not any(c.url == url for c in citations):
             citations.append(
                 Citation(
                     index=None,
-                    text=m.group(1),
-                    url=m.group(1),
+                    text=url,
+                    url=url,
                     kind="url",
                 )
             )
@@ -111,7 +138,7 @@ def extract_citations(text: str) -> CitationResult:
     for m in footnote_pattern.finditer(text):
         n = int(m.group(1))
         citation_text = m.group(2).strip()
-        url = m.group(3)
+        url = _trim_url(m.group(3)) if m.group(3) else None
         # Update existing numbered citation if found
         existing = next(
             (c for c in citations if c.index == n and c.kind == "numbered"), None
@@ -144,9 +171,21 @@ def extract_citations(text: str) -> CitationResult:
 
 
 def extract_urls(text: str) -> list[str]:
-    """Extract all URLs from text."""
+    """Extract all URLs from ``text``.
+
+    Bare URLs are returned with sentence-trailing punctuation removed (so
+    ``"see https://x.com."`` yields ``"https://x.com"``). The result is
+    deduplicated while preserving first-seen order.
+
+    Args:
+        text: Any text, typically raw LLM output.
+
+    Returns:
+        Ordered list of unique URLs.
+    """
     pattern = re.compile(r'https?://[^\s\)\]\>,"\']+', re.IGNORECASE)
-    return list(dict.fromkeys(pattern.findall(text)))  # deduplicated, order-preserving
+    urls = (_trim_url(u) for u in pattern.findall(text))
+    return list(dict.fromkeys(u for u in urls if u))  # deduped, order-preserving
 
 
 def extract_numbered_refs(text: str) -> list[int]:
@@ -171,4 +210,5 @@ __all__ = [
     "extract_urls",
     "extract_numbered_refs",
     "strip_citations",
+    "__version__",
 ]
